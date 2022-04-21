@@ -1,0 +1,18 @@
+[
+    {
+      "chan": 1,
+      "interface": "can0",
+      "bitrate":  250000
+    },
+    {
+      "chan": 2,
+      "interface": "can1",
+      "bitrate":  250000
+    },
+    {
+      "chan": 3,
+      "interface": "can2",
+      "bitrate":  500000
+    }
+  ]
+  
