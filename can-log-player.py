@@ -12,8 +12,13 @@ DEFAULT_CONFIG = 'default.json'
 
 usleep = lambda x: time.sleep(x/1000000.0)
 
+def log_error(msg):
+    import inspect
+    lineno = inspect.currentframe().f_back.f_lineno
+    print(f'ERR:{lineno}: {msg}')
+
 class CanPort:
-    def __init__(self, ch):
+    def __init__(self, ch, init):
         self.debug      = True
         self.chan       = ch['chan']
         self.interface  = ch['interface']
@@ -22,13 +27,15 @@ class CanPort:
         self.sent       = 0
         self.recieved   = 0
 
-        self.configure()
+        if init:
+            self.configure()
 
         try:
             self.bus = can.interface.Bus(bustype='socketcan', channel=self.interface, bitrate=ch['bitrate'])
         except OSError as e:
+            log_error(f'{self.interface}:   {str(e)}')
+            print(f'{ch} disabled')
             self.bus = None
-            print('{}:   {}'.format(self.interface, str(e)))
 
     def isEnabled(self):
         return self.bus is not None
@@ -39,17 +46,17 @@ class CanPort:
         os.system('sudo ifconfig {} txqueuelen {}'.format(self.interface, self.txqueuelen))
         #os.system('sudo /sbin/ip link set {} type can presume-ack on'.format(self.interface))
         os.system('sudo ifconfig {} up'.format(self.interface))
-        print('{}: configured'.format(self.interface))
+        #print('{}: configured'.format(self.interface))
 
     def send(self, msg):
         try:
             self.bus.send(msg)
             self.sent += 1
-            #if self.debug:
-                #print('{} send: {}'.format(self.interface, msg))
+            if self.debug:
+                print('{} send: {}'.format(self.interface, msg))
             return True
         except can.CanError as e:
-            #print('{}: disabled: {}'.format(self.interface, str(e)))
+            log_error(f'SEND {self.interface}: disabled: {str(e)}')
             self.bus = None
             return False
 
@@ -61,7 +68,7 @@ class CanPort:
                 if self.debug:
                     print('{} recv: {}'.format(self.interface, msg))
         except can.CanError as e:
-            print('{}:   {}'.format(self.interface, str(e)))
+            log_error(f'RECV {self.interface}: disabled: {str(e)}')
             self.bus = None
             return False
 
@@ -69,11 +76,11 @@ class CanPort:
 
 
 class CanPlayer:
-    def __init__(self, channel_map):
+    def __init__(self, channel_map, init):
         self.ports = []
 
         for ch in channel_map:
-            self.ports.append(CanPort(ch))
+            self.ports.append(CanPort(ch, init))
 
     def play(self, ascfile):
         check_can = True
@@ -90,7 +97,7 @@ class CanPlayer:
                         break
 
                 if check_can:
-                    # print('all CAN interfaces are disabed')
+                    # log('all CAN interfaces are disabed')
                     break
 
                 check_can = False
@@ -127,6 +134,7 @@ class CanPlayer:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--asc', type=str, required=True)
+    parser.add_argument('--init', action='store_true', help='Initalize the CAN ports')
 
     args = parser.parse_args()
 
@@ -141,9 +149,9 @@ if __name__ == '__main__':
     with open(cfgfile, 'r') as m:
         channels = json.load(m)
 
-    player = CanPlayer(channels)
+    player = CanPlayer(channels, args.init)
 
     try:
         player.play(ascfile)
     except can.CanError as e:
-        print(str(e))
+        log_error(str(e))
