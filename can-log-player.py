@@ -10,7 +10,7 @@ from datetime import datetime
 
 DEFAULT_CONFIG = 'default.json'
 
-usleep = lambda x: time.sleep(x/1000000.0)
+msleep = lambda x: time.sleep(x/1000.0)
 
 def log_error(msg):
     import inspect
@@ -18,8 +18,8 @@ def log_error(msg):
     print(f'ERR:{lineno}: {msg}')
 
 class CanPort:
-    def __init__(self, ch, init):
-        self.debug      = True
+    def __init__(self, ch, init, debug):
+        self.debug      = debug
         self.chan       = ch['chan']
         self.interface  = ch['interface']
         self.bitrate    = ch['bitrate']
@@ -76,11 +76,12 @@ class CanPort:
 
 
 class CanPlayer:
-    def __init__(self, channel_map, init):
+    def __init__(self, channel_map, init, verbose):
+        self.verbose = verbose
         self.ports = []
-
+        
         for ch in channel_map:
-            self.ports.append(CanPort(ch, init))
+            self.ports.append(CanPort(ch, init, verbose))
 
     def play(self, ascfile):
         check_can = True
@@ -88,6 +89,7 @@ class CanPlayer:
         reader = can.ASCReader(ascfile)
         ts_start = None
         start = datetime.now()
+        t = 0
 
         for msg in reader:
             if check_can:
@@ -104,37 +106,38 @@ class CanPlayer:
 
             if ts_start is None:
                 ts_start = msg.timestamp
-            ms = round((msg.timestamp - ts_start) * 1000000.0)
-            t = datetime.now() - start
+            ms = round((msg.timestamp - ts_start) * 1000.0)
+            t = (datetime.now() - start)/1000.0
 
-            if ms < t.microseconds:
-                usleep(t.microseconds - ms)
+            if ms > t.microseconds:
+                msleep(ms - t.microseconds)
             
             for p in self.ports:
                 if p.isEnabled() and msg.channel == p.chan:
                     if p.send(msg):
-                        self.update_status()
+                        self.update_status(t)
                     else:
                         check_can = True
 
 
-        self.update_status()
+        self.update_status(t)
         print('\ndone')
     
-    def update_status(self):
+    def update_status(self, t):
         status = ''
         for p in self.ports:
             if (p.isEnabled()):
-                status += '  [{} s:{} r:{}]'.format(p.interface, p.sent, p.recieved)
+                status += f'  [{p.interface} s:{p.sent} r:{p.recieved}]'
             else:
-                status += '  [{} s:{} r:{} DISABLED]'.format(p.interface, p.sent, p.recieved)
-        print(status, end='\r')
+                status += f'  [{p.interface} s:{p.sent} r:{p.recieved} DISABLED]'
+        print(f'   {t} {status}', end='\r')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--asc', type=str, required=True)
     parser.add_argument('--init', action='store_true', help='Initalize the CAN ports')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Verbose mode')
 
     args = parser.parse_args()
 
@@ -149,9 +152,11 @@ if __name__ == '__main__':
     with open(cfgfile, 'r') as m:
         channels = json.load(m)
 
-    player = CanPlayer(channels, args.init)
+    player = CanPlayer(channels, args.init, args.verbose)
 
     try:
         player.play(ascfile)
     except can.CanError as e:
         log_error(str(e))
+    except KeyboardInterrupt:
+        pass
